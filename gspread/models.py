@@ -247,8 +247,8 @@ class Spreadsheet(object):
         r = self.client.request('get', url, params=params)
         return r.json()
 
-    def fetch_sheet_metadata(self):
-        params = {'includeGridData': 'false'}
+    def fetch_sheet_metadata(self, include_grid_data='false'):
+        params = {'includeGridData': include_grid_data}
 
         url = SPREADSHEET_URL % self.id
 
@@ -648,15 +648,19 @@ class Worksheet(object):
             for j, value in enumerate(row)
         ]
 
-    def get_all_values(self):
+    def get_all_values(self, **kwargs):
         """Returns a list of lists containing all cells' values as strings.
-
         .. note::
-
             Empty trailing rows and columns will not be included.
         """
 
-        data = self.spreadsheet.values_get(self.title)
+        params = filter_dict_values({
+            'majorDimension': kwargs.get('major_dimension', None),
+            'valueRenderOption': kwargs.get('value_render_option', None),
+            'dateTimeRenderOption': kwargs.get('date_time_render_option', None)
+        })
+
+        data = self.spreadsheet.values_get(self.title, params=params)
 
         try:
             return fill_gaps(data['values'])
@@ -1287,6 +1291,26 @@ class Worksheet(object):
 
         return self.spreadsheet.values_append(range_label, params, body)
 
+    def append_rows(self, values, value_input_option='RAW'):
+        """Adds a row to the worksheet and populates it with values.
+        Widens the worksheet if there are more values than columns.
+        :param values: List of values for the new row.
+        :param value_input_option: (optional) Determines how input data should
+                                    be interpreted. See `ValueInputOption`_ in
+                                    the Sheets API.
+        :type value_input_option: str
+        .. _ValueInputOption: https://developers.google.com/sheets/api/reference/rest/v4/ValueInputOption
+        """
+        params = {
+            'valueInputOption': value_input_option
+        }
+
+        body = {
+            'values': values
+        }
+
+        return self.spreadsheet.values_append(self.title, params, body)
+
     def insert_row(
         self,
         values,
@@ -1365,8 +1389,14 @@ class Worksheet(object):
         """
         return self.spreadsheet.values_clear(self.title)
 
-    def _finder(self, func, query):
-        data = self.spreadsheet.values_get(self.title)
+    def _finder(self, func, query, **kwargs):
+        params = filter_dict_values({
+            'majorDimension': kwargs.get('major_dimension', None),
+            'valueRenderOption': kwargs.get('value_render_option', None),
+            'dateTimeRenderOption': kwargs.get('date_time_render_option', None)
+        })
+
+        data = self.spreadsheet.values_get(self.title, params=params)
 
         try:
             values = fill_gaps(data['values'])
@@ -1382,11 +1412,11 @@ class Worksheet(object):
         if isinstance(query, basestring):
             match = lambda x: x.value == query
         else:
-            match = lambda x: query.search(x.value)
+            match = lambda x: query.search(str(x.value))
 
         return func(match, cells)
 
-    def find(self, query):
+    def find(self, query, **kwargs):
         """Finds the first cell matching the query.
 
         :param query: A literal string to match or compiled regular expression.
@@ -1394,18 +1424,18 @@ class Worksheet(object):
 
         """
         try:
-            return self._finder(finditem, query)
+            return self._finder(finditem, query, **kwargs)
         except StopIteration:
             raise CellNotFound(query)
 
-    def findall(self, query):
+    def findall(self, query, **kwargs):
         """Finds all cells matching the query.
 
         :param query: A literal string to match or compiled regular expression.
         :type query: str, :py:class:`re.RegexObject`
 
         """
-        return list(self._finder(filter, query))
+        return list(self._finder(filter, query, **kwargs))
 
     def export(self, format):
         """.. deprecated:: 2.0
